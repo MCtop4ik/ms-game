@@ -1,4 +1,3 @@
-import ctypes
 import random
 import sqlite3
 import sys
@@ -65,7 +64,7 @@ class Settings(metaclass=singleton.Singleton):
         self.FPS = 60
         self.game_works = True
         self.status = "Not finished"
-        self.range_amount_of_cisterns = (5, 9)
+        self.range_amount_of_cisterns = (1, 1)
 
 
 class Enemy(enemy.Enemy):
@@ -109,7 +108,7 @@ class Rocket(pygame.sprite.Sprite):
         self.rect.center = pos
 
 
-class Oil(pygame.sprite.Sprite):
+class OilStation(pygame.sprite.Sprite):
     def __init__(self, pos, group):
         """
         sprite of oil to go to next level
@@ -117,10 +116,11 @@ class Oil(pygame.sprite.Sprite):
         :param group: pygame.sprite.Group oil group
         """
         super().__init__(group)
-        self.original_image = pygame.image.load("graphics/carbons/oil.png").convert_alpha()
-        self.image = pygame.transform.scale(self.original_image, (40, 40))
+        self.original_image = pygame.image.load("graphics/carbons/oil_station.png").convert_alpha()
+        self.image = pygame.transform.scale(self.original_image, (200, 350))
         self.rect = self.image.get_rect()
         self.rect.center = pos
+        self.oil = 1
 
 
 class SpriteGroups(metaclass=singleton.Singleton):
@@ -162,11 +162,13 @@ class Player(player.Player):
         self.input()
         self.rect.center += self.direction * self.speed
 
-        collided_oil = pygame.sprite.spritecollideany(self, sprite_groups.oil_group)
-        if collided_oil:
-            SpriteGroups().oil_group.remove(collided_oil)
-            collided_oil.kill()
-            PlayerStats().oil += 1
+        keys = pygame.key.get_pressed()
+        collided_oil_station = pygame.sprite.spritecollideany(self, sprite_groups.oil_group)
+        if collided_oil_station:
+            if keys[pygame.K_RETURN]:
+                PlayerStats().oil += collided_oil_station.oil
+                if collided_oil_station.oil > 0:
+                    collided_oil_station.oil -= 1
 
         collided_orb = pygame.sprite.spritecollideany(self, sprite_groups.experience_orb_group)
         if collided_orb:
@@ -181,12 +183,14 @@ class Player(player.Player):
             if keys[pygame.K_RETURN]:
                 if PlayerStats().oil == PlayerStats().amount_of_oil:
                     logging.debug("Mission accomplished. You returned on the Earth")
+                    Settings().status = "Mission accomplished.\nYou returned on the Earth"
+                    Settings().game_works = False
                 else:
                     if PlayerStats().oil < PlayerStats().amount_of_oil:
                         logging.debug("Not enough oil")
-                        Settings().game_works = False
                         Settings().status = ("While you were flying,\nfuel on rocket ended\nbefore you have"
                                              " reached\nOUR homeland-planet\nEarth")
+                        Settings().game_works = False
 
 
 def spawn_orbs(amount):
@@ -307,16 +311,16 @@ while running:
     pygame.display.update()
 
 
-def set_window_position():
-    """
-    redacts where window
-    :return:
-    """
-    window_pos_x = 200
-    window_pos_y = 100
-    user32 = ctypes.windll.user32
-    h_wnd = pygame.display.get_wm_info()["window"]
-    user32.SetWindowPos(h_wnd, 0, window_pos_x, window_pos_y, 0, 0, 0x0001)
+# def set_window_position():
+#     """
+#     redacts where window
+#     :return:
+#     """
+#     window_pos_x = 200
+#     window_pos_y = 100
+#     user32 = ctypes.windll.user32
+#     h_wnd = pygame.display.get_wm_info()["window"]
+#     user32.SetWindowPos(h_wnd, 0, window_pos_x, window_pos_y, 0, 0, 0x0001)
 
 
 class Database:
@@ -342,7 +346,18 @@ class Database:
             return 'N/A'
 
 
-set_window_position()
+def draw_bar(surface, color, x, y, width, height, value):
+    pygame.draw.rect(surface, color, (x, y, width * value, height))
+
+
+def draw_bar_text(surface, text, font_size, color, x, y):
+    font = pygame.font.SysFont("monospace", font_size, bold=True)
+    text_surface = font.render(text, True, color)
+    text_rect = text_surface.get_rect(center=(x, y))
+    surface.blit(text_surface, text_rect)
+
+
+# set_window_position()
 screen = pygame.display.set_mode((1280, 720))
 
 pygame.mixer.music.load("music/38609_ng.mp3")
@@ -382,6 +397,21 @@ ENEMY_SPRITE_INTERVAL_FUNCTION = lambda time: SPAWN_RATE ** (time // 1000) * 300
 MAGIC_BOLT_FIRE_INTERVAL = 1000
 MAGIC_BOLT_FIRE_SPEED = 200
 
+BAR_WIDTH = 200
+BAR_HEIGHT = 20
+BAR_MARGIN = 20
+RECT_MARGIN = 50
+RECT_WIDTH = BAR_WIDTH + 2 * RECT_MARGIN
+RECT_HEIGHT = 2 * BAR_HEIGHT + 3 * BAR_MARGIN
+OIL_COLOR = (255, 255, 0)
+EXP_COLOR = (0, 255, 255)
+RECT_COLOR = (100, 100, 100)
+FONT_SIZE = 14
+FONT_COLOR = (255, 255, 255)
+
+oil_level = 0
+exp_level = 0
+
 # spawns all orbs on map
 spawn_orbs(normal_amount)
 
@@ -390,7 +420,8 @@ PlayerStats().amount_of_oil = amount_of_oil
 for i in range(amount_of_oil):
     rnd_x = random.randint(-Settings().map_x, Settings().map_x)
     rnd_y = random.randint(-Settings().map_y, Settings().map_y)
-    Oil((rnd_x, rnd_y), sprites.oil_group)
+    OilStation((rnd_x, rnd_y), sprites.oil_group)
+    print(rnd_x, rnd_y)
 
 Rocket((0, 0), sprites.rocket_group)
 while True and Settings().game_works:
@@ -433,6 +464,18 @@ while True and Settings().game_works:
         magic_bolt_timer = current_time
     if current_time - magic_bolt_timer > MAGIC_BOLT_FIRE_INTERVAL:
         sprites.magic_bolt.stop_fire(sprites.magic_bolt_group, sprites.enemy_group)
+
+    oil_level = min(max(PlayerStats().oil, 0), PlayerStats().amount_of_oil)
+    exp_level = min(max(PlayerStats().experience, 0), int(PlayerStats().experience_growth()))
+
+    pygame.draw.rect(screen, RECT_COLOR, (BAR_MARGIN, BAR_MARGIN, RECT_WIDTH, RECT_HEIGHT))
+    draw_bar(screen, OIL_COLOR, BAR_MARGIN + 20, BAR_MARGIN + 20, BAR_WIDTH, BAR_HEIGHT, oil_level /
+             PlayerStats().amount_of_oil)
+    draw_bar(screen, EXP_COLOR, BAR_MARGIN + 20, 2 * BAR_MARGIN + BAR_HEIGHT + 20, BAR_WIDTH, BAR_HEIGHT, exp_level /
+             PlayerStats().experience_growth())
+    draw_bar_text(screen, "Tatneft Oil", FONT_SIZE, FONT_COLOR, BAR_MARGIN + 65, BAR_MARGIN + 10)
+    draw_bar_text(screen, "Experience", FONT_SIZE, FONT_COLOR, BAR_MARGIN + 60, BAR_MARGIN + 2 * BAR_HEIGHT + 10)
+
     pygame.display.flip()
     if total_amount < normal_amount // 2:
         spawn_orbs(normal_amount // 2)
@@ -457,7 +500,7 @@ def create_play_time(seconds):
 image_name = None
 best_time = []
 
-if Settings().status == "Mission accomplished.\nYou have returned on the Earth":
+if Settings().status == "Mission accomplished.\nYou returned on the Earth":
     image_name = 'graphics/end-screen/earth-cropped.jpg'
     color = (255, 0, 0)
     Database().add_best_time(create_play_time(PlayerStats().play_time // 1000), PlayerStats().play_time // 1000)
@@ -470,7 +513,7 @@ end_screen_rect = end_screen_surf.get_rect()
 my_font = pygame.font.SysFont("monospace", 25, bold=True)
 
 status_sentence = (Settings().status.split('\n') + [] +
-                   ['Play time:' + create_play_time(PlayerStats().play_time // 1000)] + best_time)
+                   ['Play time: ' + create_play_time(PlayerStats().play_time // 1000)] + best_time)
 screen.blit(end_screen_surf, end_screen_rect)
 start_interspace = 100
 interspace = 0
